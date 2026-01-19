@@ -66,19 +66,17 @@ async def root():
         "status": "online"
     }
 
-
+# Health check endpoint
 @app.get("/health")
 async def health_check():
-    """Detailed health check"""
-    return {
-        "status": "healthy",
-        "database": "connected",  # TODO: actual DB check
-        "redis": "connected",      # TODO: actual Redis check
-    }
+    """Health check endpoint"""
+    return {"status": "healthy", "version": settings.app_version}
 
 
 if __name__ == "__main__":
     import uvicorn
+    
+    port = int(os.getenv("PORT", 8000))
     uvicorn.run(
         "app.main:app",
         host=settings.host,
