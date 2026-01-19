@@ -1,4 +1,8 @@
-from fastapi import FastAPI, WebSocket
+"""
+Antigravity Link Backend - FastAPI Application
+Production-ready configuration for Railway deployment
+"""
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routers import auth, devices, commands, files, audit, websocket
@@ -20,10 +24,10 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS middleware - Allow all origins for development
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins in development
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,49 +41,20 @@ app.include_router(files.router, prefix="/api/v1/files", tags=["Files"])
 app.include_router(audit.router, prefix="/api/v1/audit", tags=["Audit"])
 app.include_router(websocket.router, prefix="/api/v1", tags=["WebSocket"])
 
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup"""
-    logger.info("Starting Antigravity Link Backend...")
-    # Initialize database connection pool
-    # Initialize Redis connection
-    # Initialize Firebase Admin SDK
-    logger.info("Backend started successfully")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    logger.info("Shutting down Antigravity Link Backend...")
-    # Close database connections
-    # Close Redis connections
-    logger.info("Backend shut down successfully")
+logger.info("Antigravity Link Backend started successfully")
 
 
 @app.get("/")
 async def root():
-    """Health check endpoint"""
+    """Root endpoint"""
     return {
-        "service": "Antigravity Link API",
-        "version": "1.0.0",
+        "app": "Antigravity Link",
+        "version": settings.app_version,
         "status": "online"
     }
 
-# Health check endpoint
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "version": settings.app_version}
-
-
-if __name__ == "__main__":
-    import uvicorn
-    
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(
-        "app.main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=True
-    )
