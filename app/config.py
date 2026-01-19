@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = int(os.getenv("PORT", 8000))
     
+    # File Storage
+    file_storage_path: str = "./uploads"
+    
     # Database (for future use)
     database_url: str = Field(default="sqlite:///./antigravity.db")
     
