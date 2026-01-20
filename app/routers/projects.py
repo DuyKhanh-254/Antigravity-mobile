@@ -71,6 +71,12 @@ async def write_project_file(project_id: str, device_id: str, path: str, content
     })
     return {"success": True}
 
+@router.post("/refresh")
+async def refresh_projects(device_id: str):
+    """Force a re-scan of projects on the desktop device"""
+    response = await desktop_request(device_id, "get_projects", {"force_refresh": True})
+    return response.get("projects", [])
+
 @router.post("/{project_id}/exec")
 async def run_project_command(project_id: str, device_id: str, command: str = Body(embed=True)):
     """Run a command in a project (Async results via WS)"""
