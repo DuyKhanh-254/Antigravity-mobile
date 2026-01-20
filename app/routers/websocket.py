@@ -1,5 +1,6 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Dict
+from datetime import datetime
 import logging
 import json
 import asyncio
@@ -120,11 +121,29 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif message_type == "command_complete":
                     # Desktop finished executing command
                     command_id = message.get("command_id")
+                    response_text = message.get("response", "")
+                    
+                    # Store response in commands_db for mobile to poll
                     if command_id in commands_db:
                         commands_db[command_id]["status"] = "completed"
-                        commands_db[command_id]["completed_at"] = message.get("timestamp")
-                        commands_db[command_id]["success"] = message.get("success", True)
-                        logger.info(f"Command {command_id} completed")
+                        commands_db[command_id]["completed_at"] = datetime.utcnow()
+                        commands_db[command_id]["result"] = response_text
+                        logger.info(f"Command {command_id} completed and stored in DB")
+                    else:
+                        logger.warning(f"Command {command_id} not found in DB")
+                    
+                    # Also relay to mobile devices via WebSocket (for real-time)
+                    for conn_id, conn_ws in active_connections.items():
+                        if conn_id.startswith("dev_mobile_"):
+                            try:
+                                await conn_ws.send_json({
+                                    "type": "command_response",
+                                    "command_id": command_id,
+                                    "response": response_text
+                                })
+                                logger.debug(f"Relayed response to {conn_id}")
+                            except Exception as e:
+                                logger.error(f"Failed to relay to {conn_id}: {e}")
             
             except asyncio.TimeoutError:
                 # Send ping to keep connection alive
