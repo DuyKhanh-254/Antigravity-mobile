@@ -5,7 +5,7 @@ Production-ready configuration for Railway deployment
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.routers import auth, devices, commands, files, audit, websocket
+from app.routers import auth, devices, commands, files, audit, websocket, projects
 import logging
 
 # Configure logging
@@ -39,6 +39,7 @@ app.include_router(devices.router, prefix="/api/v1/devices", tags=["Devices"])
 app.include_router(commands.router, prefix="/api/v1/commands", tags=["Commands"])
 app.include_router(files.router, prefix="/api/v1/files", tags=["Files"])
 app.include_router(audit.router, prefix="/api/v1/audit", tags=["Audit"])
+app.include_router(projects.router, prefix="/api/v1/projects", tags=["Projects"])
 app.include_router(websocket.router, prefix="/api/v1", tags=["WebSocket"])
 
 logger.info("Antigravity Link Backend started successfully")

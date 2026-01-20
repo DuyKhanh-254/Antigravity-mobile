@@ -12,6 +12,9 @@ router = APIRouter()
 # Active WebSocket connections: {device_id: websocket}
 active_connections: Dict[str, WebSocket] = {}
 
+# Pending requests from REST API to Desktop Agent: {request_id: asyncio.Future}
+pending_requests: Dict[str, asyncio.Future] = {}
+
 # Command storage (import from commands.py storage)
 from app.routers.commands import commands_db
 
@@ -162,6 +165,25 @@ async def websocket_endpoint(websocket: WebSocket):
                                 })
                             except Exception as e:
                                 logger.error(f"Failed to relay chunk to {conn_id}: {e}")
+                
+                # --- New Remote Project Handlers ---
+                
+                elif message_type in ["projects_list", "project_tree", "file_content", "write_success", "error"]:
+                    # These are responses to specific requests
+                    request_id = message.get("request_id")
+                    if request_id and request_id in pending_requests:
+                        future = pending_requests.pop(request_id)
+                        if not future.done():
+                            future.set_result(message)
+                
+                elif message_type in ["proc_stdout", "proc_exit"]:
+                    # Relay real-time process output to all mobile devices
+                    for conn_id, conn_ws in list(active_connections.items()):
+                        if conn_id.startswith("dev_mobile_"):
+                            try:
+                                await conn_ws.send_json(message)
+                            except Exception as e:
+                                logger.error(f"Failed to relay process log to {conn_id}: {e}")
             
             except asyncio.TimeoutError:
                 # Keep-alive ping
