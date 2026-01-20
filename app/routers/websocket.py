@@ -47,6 +47,21 @@ async def websocket_endpoint(websocket: WebSocket):
         active_connections[device_id] = websocket
         logger.info(f"Device connected via WebSocket: {device_id} ({device_type})")
         
+        # Auto-register in devices_db if not exists (Survive backend restarts)
+        from app.storage import devices_db
+        if device_id not in devices_db:
+            devices_db[device_id] = {
+                "device_id": device_id,
+                "device_name": init_message.get("device_name", "Unknown Device"),
+                "device_type": device_type,
+                "status": "online",
+                "paired_at": datetime.utcnow()
+            }
+            logger.info(f"Auto-registered device {device_id} in DB")
+        else:
+            devices_db[device_id]["status"] = "online"
+            logger.info(f"Updated status to online for device {device_id}")
+        
         # Acknowledge connection
         await websocket.send_json({
             "type": "connection_ack",
@@ -67,6 +82,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.debug(f"Received WebSocket message from {device_id}: {message_type}")
                 
                 if message_type == "heartbeat":
+                    # Update status in DB
+                    if device_id in devices_db:
+                        devices_db[device_id]["status"] = "online"
+                        devices_db[device_id]["last_seen"] = datetime.utcnow()
+                    
                     # Echo heartbeat to keep connection alive
                     await websocket.send_json({
                         "type": "heartbeat_ack",
