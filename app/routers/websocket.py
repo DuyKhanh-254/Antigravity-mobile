@@ -24,9 +24,17 @@ async def websocket_endpoint(websocket: WebSocket):
     
     try:
         # Receive initial message with device identification
-        init_message_text = await websocket.receive_text()
-        init_message = json.loads(init_message_text)
-        
+        try:
+            init_message_text = await asyncio.wait_for(
+                websocket.receive_text(),
+                timeout=5.0
+            )
+            init_message = json.loads(init_message_text)
+        except Exception as e:
+            logger.error(f"WebSocket identification failed: {e}")
+            await websocket.close(code=4001, reason="Identification failed")
+            return
+            
         device_type = init_message.get("device_type", "unknown")
         device_id = init_message.get("device_id")
         
@@ -35,7 +43,7 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close(code=4001, reason="No device_id provided")
             return
         
-        # Register connection
+        # Register connection (save reference to this specific websocket for safe cleanup)
         active_connections[device_id] = websocket
         logger.info(f"Device connected via WebSocket: {device_id} ({device_type})")
         
@@ -51,48 +59,60 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 message_text = await asyncio.wait_for(
                     websocket.receive_text(),
-                    timeout=120.0  # 2 minute timeout
+                    timeout=60.0  # 1 minute timeout (use heartbeat to keep alive)
                 )
                 message = json.loads(message_text)
                 message_type = message.get("type")
                 
                 logger.debug(f"Received WebSocket message from {device_id}: {message_type}")
                 
-                # Handle different message types
                 if message_type == "heartbeat":
-                    # Echo heartbeat
+                    # Echo heartbeat to keep connection alive
                     await websocket.send_json({
                         "type": "heartbeat_ack",
                         "timestamp": message.get("timestamp")
                     })
                 
                 elif message_type == "command_complete":
-                    # Desktop finished processing - relay to mobile
+                    # Desktop finished processing
                     command_id = message.get("command_id")
-                    response = message.get("response", "")
+                    response_text = message.get("response", "")
                     
-                    logger.info(f"Relaying command {command_id} response to mobile devices")
+                    logger.info(f"Command {command_id} complete. Processing storage and relay.")
                     
-                    # Broadcast to all mobile devices
-                    for conn_id, conn_ws in active_connections.items():
+                    # 1. Store in database
+                    if command_id in commands_db:
+                        commands_db[command_id]["status"] = "completed"
+                        commands_db[command_id]["completed_at"] = datetime.utcnow()
+                        commands_db[command_id]["result"] = response_text
+                        logger.info(f"Stored response for command {command_id}")
+                    
+                    # 2. Relay to mobile devices
+                    for conn_id, conn_ws in list(active_connections.items()):
                         if conn_id.startswith("dev_mobile_"):
                             try:
                                 await conn_ws.send_json({
                                     "type": "command_response",
                                     "command_id": command_id,
-                                    "response": response
+                                    "response": response_text
                                 })
                             except Exception as e:
-                                logger.error(f"Failed to send to {conn_id}: {e}")
+                                logger.error(f"Failed to relay to {conn_id}: {e}")
                 
                 elif message_type == "command_error":
-                    # Desktop error - relay to mobile
+                    # Desktop error
                     command_id = message.get("command_id")
                     error = message.get("error", "Unknown error")
                     
-                    logger.error(f"Relaying command {command_id} error to mobile")
+                    logger.error(f"Command {command_id} failed on desktop: {error}")
                     
-                    for conn_id, conn_ws in active_connections.items():
+                    # Update DB
+                    if command_id in commands_db:
+                        commands_db[command_id]["status"] = "failed"
+                        commands_db[command_id]["result"] = f"Error: {error}"
+                    
+                    # Relay to mobile
+                    for conn_id, conn_ws in list(active_connections.items()):
                         if conn_id.startswith("dev_mobile_"):
                             try:
                                 await conn_ws.send_json({
@@ -101,73 +121,52 @@ async def websocket_endpoint(websocket: WebSocket):
                                     "error": error
                                 })
                             except Exception as e:
-                                logger.error(f"Failed to send error to {conn_id}: {e}")
-                
-                elif message_type == "command_dispatch":
-                    # Desktop requesting commands (not used in current architecture)
-                    pass
+                                logger.error(f"Failed to relay error to {conn_id}: {e}")
                 
                 elif message_type == "command_chunk":
-                    # Desktop sending response chunk - relay to mobile
+                    # Desktop sending streaming response chunk
                     command_id = message.get("command_id")
+                    chunk = message.get("chunk", "")
+                    
                     if command_id in commands_db:
-                        # Update command status
                         commands_db[command_id]["status"] = "executing"
-                        
-                        # Relay to requesting device (mobile)
-                        # For MVP: just log, in production relay to mobile client
-                        logger.info(f"Command {command_id} chunk received: {message.get('chunk')[:50]}...")
-                
-                elif message_type == "command_complete":
-                    # Desktop finished executing command
-                    command_id = message.get("command_id")
-                    response_text = message.get("response", "")
                     
-                    # Store response in commands_db for mobile to poll
-                    if command_id in commands_db:
-                        commands_db[command_id]["status"] = "completed"
-                        commands_db[command_id]["completed_at"] = datetime.utcnow()
-                        commands_db[command_id]["result"] = response_text
-                        logger.info(f"Command {command_id} completed and stored in DB")
-                    else:
-                        logger.warning(f"Command {command_id} not found in DB")
-                    
-                    # Also relay to mobile devices via WebSocket (for real-time)
-                    for conn_id, conn_ws in active_connections.items():
+                    # Relay to mobile
+                    for conn_id, conn_ws in list(active_connections.items()):
                         if conn_id.startswith("dev_mobile_"):
                             try:
                                 await conn_ws.send_json({
-                                    "type": "command_response",
+                                    "type": "command_chunk",
                                     "command_id": command_id,
-                                    "response": response_text
+                                    "chunk": chunk
                                 })
-                                logger.debug(f"Relayed response to {conn_id}")
                             except Exception as e:
-                                logger.error(f"Failed to relay to {conn_id}: {e}")
+                                logger.error(f"Failed to relay chunk to {conn_id}: {e}")
             
             except asyncio.TimeoutError:
-                # Send ping to keep connection alive
-                await websocket.send_json({"type": "ping"})
+                # Keep-alive ping
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except:
+                    break
             
             except WebSocketDisconnect:
-                logger.info(f"Device {device_id} disconnected")
                 break
             
-            except json.JSONDecodeError:
-                logger.error("Invalid JSON received")
-            
             except Exception as e:
-                logger.error(f"Error handling WebSocket message: {e}")
+                logger.error(f"Error handling message from {device_id}: {e}")
                 break
     
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logger.error(f"WebSocket session error for {device_id}: {e}")
     
     finally:
-        # Remove from active connections
-        if device_id and device_id in active_connections:
+        # Safe cleanup: only remove if it's still THIS specific connection
+        if device_id and active_connections.get(device_id) == websocket:
             del active_connections[device_id]
-            logger.info(f"Device {device_id} WebSocket closed")
+            logger.info(f"Device {device_id} WebSocket removed from registry")
+        logger.info(f"WebSocket connection closed for {device_id}")
+
 
 
 async def send_command_to_device(device_id: str, command: dict) -> bool:
