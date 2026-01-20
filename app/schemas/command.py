@@ -17,7 +17,7 @@ class CommandResponse(BaseModel):
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    result: Optional[dict] = None
+    result: Optional[Any] = None
     
     class Config:
         from_attributes = True
