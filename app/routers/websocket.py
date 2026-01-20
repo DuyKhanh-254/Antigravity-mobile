@@ -65,6 +65,43 @@ async def websocket_endpoint(websocket: WebSocket):
                         "timestamp": message.get("timestamp")
                     })
                 
+                elif message_type == "command_complete":
+                    # Desktop finished processing - relay to mobile
+                    command_id = message.get("command_id")
+                    response = message.get("response", "")
+                    
+                    logger.info(f"Relaying command {command_id} response to mobile devices")
+                    
+                    # Broadcast to all mobile devices
+                    for conn_id, conn_ws in active_connections.items():
+                        if conn_id.startswith("dev_mobile_"):
+                            try:
+                                await conn_ws.send_json({
+                                    "type": "command_response",
+                                    "command_id": command_id,
+                                    "response": response
+                                })
+                            except Exception as e:
+                                logger.error(f"Failed to send to {conn_id}: {e}")
+                
+                elif message_type == "command_error":
+                    # Desktop error - relay to mobile
+                    command_id = message.get("command_id")
+                    error = message.get("error", "Unknown error")
+                    
+                    logger.error(f"Relaying command {command_id} error to mobile")
+                    
+                    for conn_id, conn_ws in active_connections.items():
+                        if conn_id.startswith("dev_mobile_"):
+                            try:
+                                await conn_ws.send_json({
+                                    "type": "command_error",
+                                    "command_id": command_id,
+                                    "error": error
+                                })
+                            except Exception as e:
+                                logger.error(f"Failed to send error to {conn_id}: {e}")
+                
                 elif message_type == "command_dispatch":
                     # Desktop requesting commands (not used in current architecture)
                     pass
