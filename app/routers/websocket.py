@@ -115,22 +115,25 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 async def send_command_to_device(device_id: str, command: dict) -> bool:
-    """Send a command to a connected device via WebSocket"""
-    if device_id not in active_connections:
+    """Send command to a specific device via WebSocket"""
+    websocket = active_connections.get(device_id)
+    
+    if not websocket:
         logger.warning(f"Device {device_id} not connected via WebSocket")
         return False
     
     try:
-        websocket = active_connections[device_id]
+        # Send command_dispatch message
         await websocket.send_json({
             "type": "command_dispatch",
             "command_id": command["command_id"],
-            "command_type": command["type"],
             "payload": command["payload"]
         })
-        logger.info(f"Command {command['command_id']} sent to device {device_id}")
+        logger.info(f"Command {command['command_id']} dispatched to device {device_id}")
         return True
-    
     except Exception as e:
-        logger.error(f"Failed to send command to {device_id}: {e}")
+        logger.error(f"Failed to send command to device {device_id}: {e}")
+        # Remove dead connection
+        if device_id in active_connections:
+            del active_connections[device_id]
         return False
